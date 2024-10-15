@@ -24,6 +24,8 @@
 /* USER CODE BEGIN Includes */
 #include "lwip/pbuf.h"
 #include "lwip/udp.h"
+#include "lwip/dhcp.h"
+#include "lwip/netif.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -33,7 +35,14 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define DHCP_OFF                   (uint8_t) 0
+#define DHCP_START                 (uint8_t) 1
+#define DHCP_WAIT_ADDRESS          (uint8_t) 2
+#define DHCP_ADDRESS_ASSIGNED      (uint8_t) 3
+#define DHCP_TIMEOUT               (uint8_t) 4
+#define DHCP_LINK_DOWN             (uint8_t) 5
 
+#define MAX_DHCP_TRIES 3
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -45,6 +54,9 @@
 
 /* USER CODE BEGIN PV */
 uint32_t connected=0;
+__IO uint8_t DHCP_state = DHCP_OFF;
+
+extern struct netif gnetif;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -53,11 +65,94 @@ static void MPU_Config(void);
 static void MX_GPIO_Init(void);
 /* USER CODE BEGIN PFP */
 void udp_receive_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip_addr_t *addr, u16_t port);
+void DHCP_Handle();
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+/**
+  * @brief This function is called when an UDP datagrm has been received on the port UDP_PORT.
+  * @param arg user supplied argument (udp_pcb.recv_arg)
+  * @param pcb the udp_pcb which received data
+  * @param p the packet buffer that was received
+  * @param addr the remote IP address from which the packet was received
+  * @param port the remote port from which the packet was received
+  * @retval None
+  */
+void udp_receive_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip_addr_t *addr, u16_t port){
+  __NOP();
+  udp_connect(upcb, addr, port);
+    /* Tell the client that we have accepted it */
+  udp_send(upcb, p);
+   /* free the UDP connection, so we can accept new clients */
+  udp_disconnect(upcb);
+    /* Free receive pbuf */
+  pbuf_free(p);
+}
 
+void DHCP_Handle(){
+    struct netif *netif = (struct netif *) &gnetif;
+    ip_addr_t ipaddr;
+    ip_addr_t netmask;
+    ip_addr_t gw;
+    struct dhcp *dhcp;
+    switch (DHCP_state)
+    {
+    case DHCP_START:
+      {
+        ip_addr_set_zero_ip4(&netif->ip_addr);
+        ip_addr_set_zero_ip4(&netif->netmask);
+        ip_addr_set_zero_ip4(&netif->gw);
+        DHCP_state = DHCP_WAIT_ADDRESS;
+#ifdef USE_LCD
+        LCD_UsrLog ("  State: Looking for DHCP server ...\n");
+#endif
+        dhcp_start(netif);
+      }
+      break;
+    case DHCP_WAIT_ADDRESS:
+      {
+        if (dhcp_supplied_address(netif))
+        {
+          DHCP_state = DHCP_ADDRESS_ASSIGNED;
+
+#ifdef USE_LCD
+          sprintf((char *)iptxt, "%s", ip4addr_ntoa(netif_ip4_addr(netif)));
+          LCD_UsrLog ("IP address assigned by a DHCP server: %s\n", iptxt);
+#endif
+        }
+        else
+        {
+          dhcp = (struct dhcp *)netif_get_client_data(netif, LWIP_NETIF_CLIENT_DATA_INDEX_DHCP);
+    
+          /* DHCP timeout */
+          if (dhcp->tries > MAX_DHCP_TRIES)
+          {
+            DHCP_state = DHCP_TIMEOUT;
+            
+            /* Static address used */
+            IP_ADDR4(&ipaddr, 192 ,168 , 1 , 4 );
+            IP_ADDR4(&netmask, 255, 255, 255, 0);
+            IP_ADDR4(&gw, 192 ,168 , 1 , 1);
+            netif_set_addr(netif, ip_2_ip4(&ipaddr), ip_2_ip4(&netmask), ip_2_ip4(&gw));
+
+#ifdef USE_LCD
+            sprintf((char *)iptxt, "%s", ip4addr_ntoa(netif_ip4_addr(netif)));
+            LCD_UsrLog ("DHCP Timeout !! \n");
+            LCD_UsrLog ("Static IP address: %s\n", iptxt);
+#endif
+          }
+        }
+      }
+      break;
+  case DHCP_LINK_DOWN:
+    {
+      DHCP_state = DHCP_OFF;
+    }
+    break;
+    default: break;
+    }
+}
 /* USER CODE END 0 */
 
 /**
@@ -113,6 +208,7 @@ struct udp_pcb *upcb;
     err_t err;
     ip_addr_t DestIPaddr;
     MX_LWIP_Process();
+    DHCP_Handle();
     if(connected){
     	connected=0;
       /* Create a new UDP control block  */
@@ -152,26 +248,6 @@ struct udp_pcb *upcb;
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
-}
-
-/**
-  * @brief This function is called when an UDP datagrm has been received on the port UDP_PORT.
-  * @param arg user supplied argument (udp_pcb.recv_arg)
-  * @param pcb the udp_pcb which received data
-  * @param p the packet buffer that was received
-  * @param addr the remote IP address from which the packet was received
-  * @param port the remote port from which the packet was received
-  * @retval None
-  */
-void udp_receive_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip_addr_t *addr, u16_t port){
-  __NOP();
-  udp_connect(upcb, addr, port);
-    /* Tell the client that we have accepted it */
-  udp_send(upcb, p);
-   /* free the UDP connection, so we can accept new clients */
-  udp_disconnect(upcb);
-    /* Free receive pbuf */
-  pbuf_free(p);
 }
 
 /**
