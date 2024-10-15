@@ -22,7 +22,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "lwip/pbuf.h"
+#include "lwip/udp.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -43,7 +44,7 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-
+uint32_t connected=0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -51,7 +52,7 @@ void SystemClock_Config(void);
 static void MPU_Config(void);
 static void MX_GPIO_Init(void);
 /* USER CODE BEGIN PFP */
-
+void udp_receive_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip_addr_t *addr, u16_t port);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -108,12 +109,69 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	    MX_LWIP_Process();
+struct udp_pcb *upcb;
+    err_t err;
+    ip_addr_t DestIPaddr;
+    MX_LWIP_Process();
+    if(connected){
+    	connected=0;
+      /* Create a new UDP control block  */
+      upcb = udp_new();
+      if(upcb!=NULL){
+        /*assign destination IP address */
+        IP4_ADDR( &DestIPaddr, 192, 168, 1, 1 );
+
+        /* Using IP_ADDR_ANY allow the upcb to be used by any local interface */
+         err = udp_bind(upcb, IP_ADDR_ANY, 3999);
+        /* configure destination IP address and port */
+        // err= udp_connect(upcb, &DestIPaddr, 3999);
+
+        if (err == ERR_OK){
+            /* Set a receive callback for the upcb */
+          udp_recv(upcb, udp_receive_callback, NULL);  
+        	//  u8_t   data[100]= {"Hello"};
+        	//  struct pbuf *p;
+        	//  /* allocate pbuf from pool*/
+        	//  p = pbuf_alloc(PBUF_TRANSPORT,strlen((char*)data), PBUF_POOL); /* Set a receive callback for the upcb */
+        	// if (p != NULL)
+        	// {
+          //   /* Set a receive callback for the upcb */
+          //   udp_recv(upcb, udp_receive_callback, NULL);  
+        	// 	/* copy data to pbuf */
+          //   pbuf_take(p, (char*)data, strlen((char*)data));
+          //   udp_send(upcb, p);
+			    // /* free pbuf */
+          //   pbuf_free(p);
+          //   // udp_disconnect(upcb);
+        	// }
+        }
+      }
+    }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
+}
+
+/**
+  * @brief This function is called when an UDP datagrm has been received on the port UDP_PORT.
+  * @param arg user supplied argument (udp_pcb.recv_arg)
+  * @param pcb the udp_pcb which received data
+  * @param p the packet buffer that was received
+  * @param addr the remote IP address from which the packet was received
+  * @param port the remote port from which the packet was received
+  * @retval None
+  */
+void udp_receive_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip_addr_t *addr, u16_t port){
+  __NOP();
+  udp_connect(upcb, addr, port);
+    /* Tell the client that we have accepted it */
+  udp_send(upcb, p);
+   /* free the UDP connection, so we can accept new clients */
+  udp_disconnect(upcb);
+    /* Free receive pbuf */
+  pbuf_free(p);
 }
 
 /**
